@@ -41,7 +41,7 @@ MotorMinds is an advanced Automotive Smart Insights Platform that leverages mach
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/motor-minds.git
+   git clone https://github.com/yashsinghal14/motor-minds.git
    cd motor-minds
    ```
 
@@ -68,7 +68,7 @@ MotorMinds is an advanced Automotive Smart Insights Platform that leverages mach
 ## 🚀 Usage
 
 ### 🌐 Live Demo
-Try the live application: **[MotorMinds Live Demo](YOUR_DEPLOYMENT_LINK_HERE)**
+Try the live application: **[MotorMinds Live Demo](https://motorminds.streamlit.app/)**
 
 ### 💻 Local Development
 
