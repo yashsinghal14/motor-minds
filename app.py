@@ -8,8 +8,54 @@ import seaborn as sns
 import warnings
 warnings.filterwarnings("ignore")
 
+import hashlib
+
+# User database
+USERS = {
+    "admin": hashlib.sha256("admin123".encode()).hexdigest(),
+    "user1": hashlib.sha256("password123".encode()).hexdigest(),
+}
+
+def verify_password(username, password):
+    if username in USERS:
+        return USERS[username] == hashlib.sha256(password.encode()).hexdigest()
+    return False
+
+def login_page():
+    st.title("🔐 MotorMinds Login")
+    with st.form("login_form"):
+        st.subheader("Please Login to Continue")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.form_submit_button("Login"):
+            if verify_password(username, password):
+                st.session_state['logged_in'] = True
+                st.session_state['username'] = username
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+    st.info("**Demo:** Username: `admin` | Password: `admin123`")
+
+# Initialize session state
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
 # Set up the main function
 def main():
+    if not st.session_state['logged_in']:
+        login_page()
+        return
+    
+    # Add logout button in sidebar
+    with st.sidebar:
+        st.markdown("---")
+        st.write(f"👤 **{st.session_state['username']}**")
+        if st.button("Logout"):
+            st.session_state['logged_in'] = False
+            st.rerun()
+    
+    # Your existing code continues here...
+    st.set_page_config(page_title="MotorMinds", layout="wide")
     st.set_page_config(page_title="MotorMinds", layout="wide")
     st.title("MotorMinds - Automotive Smart Insights Platform")
 
