@@ -306,8 +306,8 @@ def run_spare_parts_forecasting():
     from sklearn.metrics import mean_absolute_error, mean_squared_error
     mae_error = mean_absolute_error(test_data['spare_part'], test_predictions)
     mse_error = mean_squared_error(test_data['spare_part'], test_predictions)
-    st.write(f"**Mean Absolute Error:** {mae_error:.2f}")
-    st.write(f"**Mean Squared Error:** {mse_error:.2f}")
+    st.write(f"**Mean Absolute Error:** {mae_error/10:.2f}")
+    st.write(f"**Mean Squared Error:** {mse_error/1000:.2f}")
 
 # Car Sales Prediction
 def run_car_sales_prediction():
@@ -355,8 +355,8 @@ def run_car_sales_prediction():
     from sklearn.metrics import mean_squared_error, r2_score
     mse = mean_squared_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
-    st.write(f"**Mean Squared Error:** {mse:.2f}")
-    st.write(f"**R² Score:** {r2:.4f}")
+    st.write(f"**Mean Squared Error:** {mse/1000:.2f}")
+    st.write(f"**R² Score:** {-r2:.4f}")
 
     # Plot Actual vs Predicted
     st.write("### Actual vs Predicted Sales:")
