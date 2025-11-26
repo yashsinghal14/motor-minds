@@ -3,14 +3,105 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import hashlib
+import time
+from datetime import datetime, timedelta
 
 # Suppress warnings
 import warnings
 warnings.filterwarnings("ignore")
 
-import hashlib
+# -----------------------------------------------------------------------------
+# UTILITIES & MOCK DATA GENERATORS
+# -----------------------------------------------------------------------------
 
-# User database
+def generate_maintenance_data(n_samples=1000):
+    np.random.seed(42)
+    data = {
+        'Temperature': np.random.normal(80, 15, n_samples),
+        'Pressure': np.random.normal(35, 5, n_samples),
+        'Vibration': np.random.normal(0.5, 0.2, n_samples),
+        'UsageHours': np.random.randint(100, 5000, n_samples),
+        'DaysSinceMaintenance': np.random.randint(1, 180, n_samples),
+        'ComponentHealth': np.random.uniform(0.5, 1.0, n_samples),
+        'ComponentID': np.random.choice([f'C-{i}' for i in range(1, 21)], n_samples)
+    }
+    df = pd.DataFrame(data)
+    # Simulate failure based on conditions
+    df['Failure'] = (
+        (df['Temperature'] > 100) | 
+        (df['Pressure'] > 45) | 
+        (df['Vibration'] > 0.8) | 
+        (df['ComponentHealth'] < 0.6)
+    ).astype(int)
+    # Add some noise
+    flip_indices = np.random.choice(n_samples, size=int(n_samples*0.05), replace=False)
+    df.loc[flip_indices, 'Failure'] = 1 - df.loc[flip_indices, 'Failure']
+    return df
+
+def generate_inventory_data():
+    dates = pd.date_range(start='2022-01-01', periods=104, freq='W')
+    data = []
+    base_demand = 100
+    for date in dates:
+        # Seasonal pattern + trend
+        seasonal = 20 * np.sin(2 * np.pi * date.week / 52)
+        trend = 0.5 * (date.year - 2022) * 52 + date.week * 0.1
+        noise = np.random.normal(0, 10)
+        demand = int(max(0, base_demand + seasonal + trend + noise))
+        data.append({'date': date, 'spare_part': demand})
+    return pd.DataFrame(data).set_index('date')
+
+def generate_sales_data():
+    dates = pd.date_range(start='2020-01-01', periods=48, freq='M')
+    data = {
+        'date': dates,
+        'sales': np.random.randint(200, 500, 48) + np.arange(48) * 5,
+        'price': np.random.uniform(20000, 35000, 48),
+        'marketing_spend': np.random.uniform(5000, 20000, 48),
+        'festival_season': [1 if m in [10, 11, 12] else 0 for m in dates.month],
+        'competitor_launches': np.random.randint(0, 3, 48)
+    }
+    df = pd.DataFrame(data)
+    df['month'] = df['date'].dt.month
+    df['year'] = df['date'].dt.year
+    return df
+
+def generate_sentiment_data():
+    reviews = [
+        "Great service, very quick!", "The engine noise is still there.", "Love the new model!",
+        "Maintenance costs are too high.", "Smooth drive and great mileage.", "Dealership staff was rude.",
+        "Excellent build quality.", "Battery drained too fast.", "Best purchase I've made.",
+        "Spare parts are hard to find."
+    ]
+    # Fixed: reduced list to 2 items to match the size of probability array p=[0.6, 0.4]
+    sentiments = ["Positive", "Negative"]
+    dates = pd.date_range(end=datetime.now(), periods=100).tolist()
+    
+    data = {
+        'Date': np.random.choice(dates, 500),
+        'Review': np.random.choice(reviews, 500),
+        'Sentiment': np.random.choice(sentiments, 500, p=[0.6, 0.4]), # Slightly biased towards positive
+        'Car_Model': np.random.choice(['Model X', 'Model Y', 'Civic Type Z', 'Raptor F'], 500)
+    }
+    return pd.DataFrame(data)
+
+def generate_geo_data():
+    # Generate random points around a central lat/long (e.g., USA center)
+    base_lat, base_lon = 39.8283, -98.5795
+    n_dealers = 50
+    data = {
+        'lat': np.random.normal(base_lat, 5, n_dealers),
+        'lon': np.random.normal(base_lon, 10, n_dealers),
+        'Sales_Volume': np.random.randint(50, 500, n_dealers),
+        'Region': np.random.choice(['North', 'South', 'East', 'West'], n_dealers)
+    }
+    return pd.DataFrame(data)
+
+# -----------------------------------------------------------------------------
+# AUTHENTICATION
+# -----------------------------------------------------------------------------
+
 USERS = {
     "admin": hashlib.sha256("admin123".encode()).hexdigest(),
     "user1": hashlib.sha256("password123".encode()).hexdigest(),
@@ -22,380 +113,481 @@ def verify_password(username, password):
     return False
 
 def login_page():
-    st.title("🔐 MotorMinds Login")
-    with st.form("login_form"):
-        st.subheader("Please Login to Continue")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.form_submit_button("Login"):
-            if verify_password(username, password):
-                st.session_state['logged_in'] = True
-                st.session_state['username'] = username
-                st.rerun()
-            else:
-                st.error("Invalid credentials")
-    st.info("**Demo:** Username: `admin` | Password: `admin123`")
+    # Custom CSS for a professional look
+    st.markdown("""
+        <style>
+        .login-header {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #1E3A8A; 
+            margin-bottom: 0.5rem;
+        }
+        .login-subheader {
+            font-size: 1.1rem;
+            color: #4B5563;
+            margin-bottom: 1.5rem;
+        }
+        .feature-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.8rem;
+            font-size: 1rem;
+            color: #374151;
+        }
+        .feature-icon {
+            margin-right: 12px;
+            font-size: 1.2rem;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
-# Initialize session state
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
+    col1, col2 = st.columns([1.5, 1])
 
-# Set up the main function
+    with col1:
+        st.markdown('<div class="login-header">MotorMinds</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-subheader">Next-Gen Automotive Intelligence Platform</div>', unsafe_allow_html=True)
+        
+        # Professional Automotive Image
+        st.image("https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80", 
+                 caption="Data-Driven Performance", use_container_width=True)
+        
+        st.markdown("""
+        <div style="margin-top: 20px;">
+            <div class="feature-item">
+                <span class="feature-icon">🔍</span>
+                <span><b>Predictive Maintenance</b>: AI-driven failure forecasting.</span>
+            </div>
+            <div class="feature-item">
+                <span class="feature-icon">📊</span>
+                <span><b>Sales Analytics</b>: Real-time market insights.</span>
+            </div>
+            <div class="feature-item">
+                <span class="feature-icon">⚡</span>
+                <span><b>Live Telemetry</b>: Real-time IoT monitoring.</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("<br><br>", unsafe_allow_html=True) # Vertical spacer
+        
+        with st.container(border=True):
+            st.markdown("### 🔐 Member Login")
+            st.markdown("Welcome back! Please enter your details.")
+            
+            with st.form("login_form"):
+                username = st.text_input("Username", placeholder="e.g. admin")
+                password = st.text_input("Password", type="password", placeholder="••••••••")
+                
+                submitted = st.form_submit_button("Sign In", use_container_width=True, type="primary")
+                
+                if submitted:
+                    if verify_password(username, password):
+                        st.session_state['logged_in'] = True
+                        st.session_state['username'] = username
+                        st.rerun()
+                    else:
+                        st.error("Invalid username or password")
+
+            st.markdown("""
+                <div style="text-align: center; margin-top: 15px; font-size: 0.85em;">
+                    <a href="#" style="color: #666; text-decoration: none; margin-right: 10px;">Forgot Password?</a>
+                    <span style="color: #ccc;">|</span>
+                    <a href="#" style="color: #666; text-decoration: none; margin-left: 10px;">Contact Support</a>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            st.divider()
+            st.info("💡 **Demo Access:**\n\nAdmin: `admin` / `admin123`\nUser: `user1` / `password123`")
+
+# -----------------------------------------------------------------------------
+# MAIN APP LOGIC
+# -----------------------------------------------------------------------------
+
 def main():
+    if 'logged_in' not in st.session_state:
+        st.session_state['logged_in'] = False
+
     if not st.session_state['logged_in']:
         login_page()
         return
     
-    # Add logout button in sidebar
+    # Check Role
+    username = st.session_state.get('username', 'User')
+    is_admin = username == 'admin'
+    role_name = "Administrator" if is_admin else "Standard User"
+    
+    # Sidebar
     with st.sidebar:
-        st.markdown("---")
-        st.write(f"👤 **{st.session_state['username']}**")
-        if st.button("Logout"):
+        st.image("https://img.icons8.com/color/96/000000/engine.png", width=60)
+        st.title("MotorMinds")
+        
+        # Profile Badge
+        with st.container(border=True):
+            st.markdown(f"👤 **{username}**")
+            st.caption(f"Role: {role_name}")
+        
+        if st.button("Logout", type="secondary", use_container_width=True):
             st.session_state['logged_in'] = False
             st.rerun()
-    
-    # Your existing code continues here...
-    st.set_page_config(page_title="MotorMinds", layout="wide")
-    st.set_page_config(page_title="MotorMinds", layout="wide")
-    st.title("MotorMinds - Automotive Smart Insights Platform")
+        
+        st.markdown("---")
+        
+        # Menu Permissions
+        if is_admin:
+            menu = [
+                "Home", 
+                "Predictive Maintenance", 
+                "Spare Parts Forecasting", 
+                "Car Sales Prediction",
+                "Customer Sentiment", 
+                "Geospatial Insights",
+                "Real-time Simulator"
+            ]
+        else:
+            # Restricted menu for standard users
+            menu = [
+                "Home",
+                "Predictive Maintenance",
+                "Real-time Simulator"
+            ]
+            
+        choice = st.radio("Navigation", menu)
+        
+        if not is_admin:
+            st.info("🔒 Advanced modules are restricted to Admin users.")
 
-    # Sidebar menu
-    menu = ["Home", "Predictive Maintenance", "Spare Parts Demand Forecasting", "Car Sales Prediction"]
-    choice = st.sidebar.selectbox("Select Analysis", menu)
+        st.markdown("---")
+        st.caption("© 2024 MotorMinds Analytics")
 
+    # Routing
     if choice == "Home":
-        show_home_page()
+        show_home_page(is_admin)
     elif choice == "Predictive Maintenance":
         run_predictive_maintenance()
-    elif choice == "Spare Parts Demand Forecasting":
-        run_spare_parts_forecasting()
+    elif choice == "Spare Parts Forecasting":
+        if is_admin: run_spare_parts_forecasting()
     elif choice == "Car Sales Prediction":
-        run_car_sales_prediction()
+        if is_admin: run_car_sales_prediction()
+    elif choice == "Customer Sentiment":
+        if is_admin: run_sentiment_analysis()
+    elif choice == "Geospatial Insights":
+        if is_admin: run_geo_analysis()
+    elif choice == "Real-time Simulator":
+        run_realtime_simulator()
 
-def show_home_page():
-    st.write("""
-    ## Welcome to MotorMinds
+# -----------------------------------------------------------------------------
+# PAGE FUNCTIONS
+# -----------------------------------------------------------------------------
 
-    **MotorMinds** is an Automotive Smart Insights Platform that leverages advanced data analytics and machine learning to provide accurate forecasts and predictions for the automotive industry. Our platform helps automotive companies optimize inventory, improve customer satisfaction, and increase operational efficiency.
+def show_home_page(is_admin):
+    st.title("🚀 Welcome to MotorMinds")
+    
+    if is_admin:
+        st.markdown("### Executive Dashboard")
+        st.markdown("_Overview of strategic KPIs and system-wide performance._")
+    else:
+        st.markdown("### Operational Dashboard")
+        st.markdown("_Overview of assigned vehicle monitoring and real-time status._")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        if is_admin:
+            st.success("✅ **System Integrity**: All regional servers operational.")
+            st.write("""
+            **Admin Actions:**
+            * Review **Sales Predictions** for Q4 strategy.
+            * Check **Spare Parts Inventory** alerts.
+            * Analyze **Customer Sentiment** trends.
+            """)
+        else:
+            st.info("ℹ️ **Shift Update**: You are monitoring Sector 7.")
+            st.write("""
+            **User Actions:**
+            * Monitor **Real-time Telemetry** for Vehicle V-X99.
+            * Run **Predictive Maintenance** checks on reported sensors.
+            """)
+        
+        st.subheader("Platform Capabilities")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("""
+            * **Predictive Maintenance**
+            * **Real-time Simulator**
+            """)
+        with c2:
+            if is_admin:
+                st.markdown("""
+                * **Sales & Inventory AI**
+                * **Geospatial Analytics**
+                """)
 
-    ### Key Features
+    with col2:
+        # Metrics differ by role
+        with st.container(border=True):
+            if is_admin:
+                st.metric(label="Total Revenue (YTD)", value="$4.2M", delta="+12%")
+                st.metric(label="Global Fleet Health", value="98.4%", delta="+0.2%")
+                st.metric(label="Active Alerts", value="3", delta="Normal", delta_color="off")
+            else:
+                st.metric(label="Vehicles Online", value="14", delta="Sector 7")
+                st.metric(label="Pending Inspections", value="2", delta="-1")
+                st.metric(label="Shift Efficiency", value="94%", delta="+2%")
 
-    - **Vehicle Sales Forecasting**: Predict future vehicle sales using time series analysis and machine learning models.
-    - **Predictive Maintenance**: Anticipate maintenance needs and potential component failures before they occur.
-    - **Spare Parts Demand Prediction**: Accurately forecast spare parts demand to optimize inventory levels.
-
-    ### Benefits
-
-    - **Optimize Inventory Management**: Reduce holding costs and prevent stockouts by maintaining optimal inventory levels.
-    - **Enhance Vehicle Reliability**: Minimize unexpected breakdowns and extend vehicle lifespan through predictive maintenance.
-    - **Adapt to Market Changes**: Stay ahead of market shifts by adapting quickly based on accurate sales forecasts.
-
-    ### How to Use This App
-
-    - Navigate through the app using the sidebar menu.
-    - Upload your own data or adjust parameters in each section to see customized insights.
-    - Visualize results through interactive graphs and charts.
-
-    **Get started by selecting an analysis from the sidebar!**
-    """)
-
-# Predictive Maintenance Analysis
 def run_predictive_maintenance():
-    st.subheader("Predictive Maintenance Analysis")
+    st.header("🔧 Predictive Maintenance Analysis")
+    st.markdown("Analyze sensor data to predict component failures using Machine Learning.")
 
-    # Upload data
-    uploaded_file = st.file_uploader("Upload your predictive maintenance data CSV file", type=["csv"])
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-    else:
-        st.info("Using default dataset.")
-        df = pd.read_csv("data/predictive_maintenance_data.csv")
+    tabs = st.tabs(["Data & Model", "Visualizations", "Live Scoring"])
 
-    # Data preprocessing
-    df["Failure"] = df["Failure"].astype(int)
-
-    # Feature selection
-    feature_cols = ["Temperature", "Pressure", "Vibration", "UsageHours", "DaysSinceMaintenance", "ComponentHealth"]
-    X = df[feature_cols].values
-    y = df["Failure"].values
-
-    # Parameter adjustments
-    st.sidebar.subheader("Model Parameters")
-    max_depth = st.sidebar.slider("Decision Tree Max Depth", 1, 10, 6)
-    min_samples_split = st.sidebar.slider("Decision Tree Min Samples Split", 2, 100, 50)
-    min_samples_leaf = st.sidebar.slider("Decision Tree Min Samples Leaf", 1, 50, 20)
-    lr_C = st.sidebar.slider("Logistic Regression Inverse Regularization Strength (C)", 0.001, 1.0, 0.01)
-
-    # Function to split data by components to prevent data leakage
-    def split_by_component(df, test_size=0.3):
-        components = df["ComponentID"].unique()
-        np.random.shuffle(components)
-        split_point = int(len(components) * (1 - test_size))
-        train_components = components[:split_point]
-        test_components = components[split_point:]
+    with tabs[0]:
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.markdown("#### Data Source")
+            data_source = st.radio("Select Source", ["Use Synthetic Data", "Upload CSV"])
         
-        train_df = df[df["ComponentID"].isin(train_components)]
-        test_df = df[df["ComponentID"].isin(test_components)]
-        
-        X_train = train_df[feature_cols].values
-        y_train = train_df["Failure"].values.astype(int)
-        X_test = test_df[feature_cols].values
-        y_test = test_df["Failure"].values.astype(int)
-        
-        return X_train, X_test, y_train, y_test, train_components, test_components
+        df = None
+        if data_source == "Upload CSV":
+            uploaded_file = st.file_uploader("Upload sensor data", type=["csv"])
+            if uploaded_file:
+                df = pd.read_csv(uploaded_file)
+        else:
+            df = generate_maintenance_data()
+            st.success("Generated 1000 synthetic sensor records.")
 
-    # Split the data
-    X_train, X_test, y_train, y_test, train_components, test_components = split_by_component(df, test_size=0.3)
+        if df is not None:
+            with col2:
+                st.dataframe(df.head(5), use_container_width=True)
 
-    # Scale the features
-    from sklearn.preprocessing import StandardScaler
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+            # Modeling Logic
+            feature_cols = ["Temperature", "Pressure", "Vibration", "UsageHours", "DaysSinceMaintenance", "ComponentHealth"]
+            
+            # Simple check if columns exist
+            if not all(col in df.columns for col in feature_cols):
+                st.error(f"Dataset must contain: {feature_cols}")
+                return
 
-    # Implement Decision Tree and Logistic Regression
-    from sklearn.tree import DecisionTreeClassifier
-    from sklearn.linear_model import LogisticRegression
+            X = df[feature_cols].values
+            y = df["Failure"].values
+            
+            # Train/Test Split
+            from sklearn.model_selection import train_test_split
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+            
+            # Model Training
+            from sklearn.ensemble import RandomForestClassifier
+            model = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)
+            model.fit(X_train, y_train)
+            
+            y_pred = model.predict(X_test)
+            
+            # Metrics
+            from sklearn.metrics import accuracy_score, f1_score
+            acc = accuracy_score(y_test, y_pred)
+            f1 = f1_score(y_test, y_pred)
+            
+            st.divider()
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Model Accuracy", f"{acc*100:.1f}%")
+            m2.metric("F1 Score", f"{f1:.3f}")
+            m3.metric("Test Samples", len(X_test))
 
-    # Train Decision Tree
-    tree = DecisionTreeClassifier(max_depth=max_depth, min_samples_split=min_samples_split, min_samples_leaf=min_samples_leaf)
-    tree.fit(X_train_scaled, y_train)
+    with tabs[1]:
+        if df is not None:
+            st.subheader("Feature Correlations")
+            fig, ax = plt.subplots(figsize=(10, 4))
+            
+            # Fix: Select only numeric columns for correlation matrix
+            numeric_df = df.select_dtypes(include=[np.number])
+            sns.heatmap(numeric_df.corr(), annot=True, cmap='coolwarm', ax=ax, fmt=".2f")
+            
+            st.pyplot(fig)
+            
+            st.subheader("Failure Distribution by Temperature")
+            fig2, ax2 = plt.subplots()
+            sns.histplot(data=df, x="Temperature", hue="Failure", kde=True, ax=ax2)
+            st.pyplot(fig2)
 
-    # Get leaf nodes
-    train_regions = tree.apply(X_train_scaled)
-    test_regions = tree.apply(X_test_scaled)
+    with tabs[2]:
+        st.subheader("Single Component Scorer")
+        with st.form("prediction_form"):
+            c1, c2, c3 = st.columns(3)
+            temp = c1.number_input("Temperature", 50, 150, 85)
+            pres = c2.number_input("Pressure", 20, 60, 35)
+            vib = c3.number_input("Vibration", 0.0, 1.0, 0.4)
+            hours = c1.number_input("Usage Hours", 0, 10000, 2000)
+            days = c2.number_input("Days Since Maint.", 0, 365, 45)
+            health = c3.slider("Component Health Index", 0.0, 1.0, 0.9)
+            
+            if st.form_submit_button("Predict Failure Risk"):
+                # Mock prediction usage
+                input_data = np.array([[temp, pres, vib, hours, days, health]])
+                if df is not None:
+                    prob = model.predict_proba(input_data)[0][1]
+                    pred = model.predict(input_data)[0]
+                    
+                    if pred == 1:
+                        st.error(f"⚠️ High Failure Risk Detected! (Probability: {prob:.2f})")
+                        st.warning("Recommendation: Schedule maintenance immediately.")
+                    else:
+                        st.success(f"✅ Component Healthy. (Failure Probability: {prob:.2f})")
 
-    # One-hot encode the leaf nodes
-    from sklearn.preprocessing import OneHotEncoder
-    enc = OneHotEncoder()
-    X_train_regions = enc.fit_transform(train_regions.reshape(-1, 1)).toarray()
-    X_test_regions = enc.transform(test_regions.reshape(-1, 1)).toarray()
-
-    # Combine features
-    X_train_hybrid = np.hstack((X_train_scaled, X_train_regions))
-    X_test_hybrid = np.hstack((X_test_scaled, X_test_regions))
-
-    # Train Logistic Regression with class weights
-    class_weights = {0: 1.0, 1: np.sum(y_train == 0) / np.sum(y_train == 1)}
-    lr = LogisticRegression(C=lr_C, max_iter=1000, class_weight=class_weights)
-    lr.fit(X_train_hybrid, y_train)
-
-    # Make predictions with optimized threshold
-    y_pred_prob = lr.predict_proba(X_test_hybrid)[:, 1]
-    # Find optimal threshold using F1 score
-    from sklearn.metrics import f1_score
-    thresholds = np.linspace(0.1, 0.9, 50)
-    f1_scores = []
-    for threshold in thresholds:
-        y_pred = (y_pred_prob >= threshold).astype(int)
-        f1_scores.append(f1_score(y_test, y_pred))
-    optimal_threshold = thresholds[np.argmax(f1_scores)]
-
-    y_pred = (y_pred_prob >= optimal_threshold).astype(int)
-
-    # Evaluate and plot results
-    from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
-    accuracy = accuracy_score(y_test, y_pred)
-    precision = precision_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
-    roc_auc = roc_auc_score(y_test, y_pred_prob)
-    conf_matrix = confusion_matrix(y_test, y_pred)
-
-    # Display Metrics
-    st.write("### Model Performance Metrics:")
-    st.write(f"**Accuracy:** {accuracy * 100:.2f}%")
-    st.write(f"**Precision:** {precision:.4f}")
-    st.write(f"**Recall:** {recall:.4f}")
-    st.write(f"**F1-Score:** {f1:.4f}")
-    st.write(f"**ROC-AUC:** {roc_auc:.4f}")
-
-    # Display Confusion Matrix
-    st.write("### Confusion Matrix:")
-    fig, ax = plt.subplots()
-    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues',
-                xticklabels=['No Failure', 'Failure'],
-                yticklabels=['No Failure', 'Failure'])
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
-    st.pyplot(fig)
-
-    # ROC Curve
-    st.write("### ROC Curve:")
-    from sklearn.metrics import roc_curve
-    fpr, tpr, _ = roc_curve(y_test, y_pred_prob)
-    fig2, ax2 = plt.subplots()
-    ax2.plot(fpr, tpr, label=f'ROC (AUC = {roc_auc:.3f})')
-    ax2.plot([0, 1], [0, 1], 'k--')
-    ax2.set_xlabel('False Positive Rate')
-    ax2.set_ylabel('True Positive Rate')
-    ax2.legend()
-    st.pyplot(fig2)
-
-# Spare Parts Demand Forecasting
 def run_spare_parts_forecasting():
-    st.subheader("Spare Parts Demand Forecasting")
+    st.header("📦 Spare Parts Demand Forecasting")
+    
+    data = generate_inventory_data()
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.line_chart(data)
+    with col2:
+        st.write("### Data Stats")
+        st.write(data.describe())
 
-    # Upload data
-    uploaded_file = st.file_uploader("Upload your inventory data CSV file", type=["csv"])
-    if uploaded_file is not None:
-        data = pd.read_csv(uploaded_file)
-    else:
-        st.info("Using default dataset.")
-        data = pd.read_csv("data/inventory.csv")
+    st.subheader("Forecast Settings")
+    periods = st.slider("Weeks to Forecast", 1, 20, 10)
+    
+    # Simple Exponential Smoothing (Mocked for stability without complex statsmodels deps if needed)
+    # Using simple moving average + trend for demo purposes if statsmodels fails, 
+    # but here we assume standard environment.
+    try:
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing
+        model = ExponentialSmoothing(data['spare_part'], trend='add', seasonal='add', seasonal_periods=12).fit()
+        forecast = model.forecast(periods)
+        
+        forecast_df = pd.DataFrame({'Forecast': forecast})
+        
+        st.subheader("Forecast Results")
+        st.line_chart(pd.concat([data['spare_part'], forecast_df['Forecast']]))
+        
+        with st.expander("View Forecast Data"):
+            st.dataframe(forecast_df)
+            
+    except Exception as e:
+        st.error(f"Forecasting Error: {e}")
+        st.info("Ensure statsmodels is installed.")
 
-    # Data preprocessing
-    data = data[pd.notnull(data.invoice_line_text)].reset_index(drop=True)
-    data = data[data.current_km_reading <= 100000].reset_index(drop=True)
-
-    # Dropping redundant columns
-    data = data[['job_card_date', 'vehicle_model', 'invoice_line_text']]
-
-    # Data cleaning (simplified for brevity)
-    data['invoice_line_text'] = data['invoice_line_text'].str.replace('BULB ', 'BULB')
-    data['invoice_line_text'] = data['invoice_line_text'].str.replace('OVERHUAL', 'OVERHAUL')
-
-    # Dropping rows related to services
-    service_related_tokens = [
-        'OVERHAUL', 'WELDING', 'SERVICE', 'WORK', 'PUNCHER', 'REBORE',
-        'DENT', 'RC CARD', 'TAX', 'ENGINE WORK', 'CHECK', 'LABOUR',
-        'CHARGE', 'FEES', 'PAYMENT', 'STICKERS', 'ADJUSTMENT', 'REGISTOR',
-        'INSURANCE', 'ADJUSTMENT', 'REMOVAL', 'THREADING', 'CLEANING',
-    ]
-    data = data[~data['invoice_line_text'].isin(service_related_tokens)].reset_index(drop=True)
-
-    # Renaming columns
-    data.rename(columns={"job_card_date": "date", "invoice_line_text": "spare_part"}, inplace=True)
-    data['date'] = pd.to_datetime(data['date'], format='%d-%m-%y')
-
-    # Setting date as index
-    data_indexed = data.set_index('date')
-
-    # Resampling
-    weekly_data_indexed = data_indexed[['spare_part']].resample('W').count()
-
-    # Time Series Decomposition
-    from statsmodels.tsa.seasonal import seasonal_decompose
-    result = seasonal_decompose(weekly_data_indexed['spare_part'], model='mul', period=4)
-
-    # Plot decomposition
-    st.write("### Time Series Decomposition:")
-    fig3 = result.plot()
-    st.pyplot(fig3)
-
-    # Train-Test Split
-    st.sidebar.subheader("Forecasting Parameters")
-    split_point = st.sidebar.slider("Number of Weeks for Testing", 4, 52, 16)
-    train_data = weekly_data_indexed[:-split_point]
-    test_data = weekly_data_indexed[-split_point:]
-
-    # Exponential Smoothing Model
-    from statsmodels.tsa.holtwinters import ExponentialSmoothing
-    fitted_model = ExponentialSmoothing(train_data['spare_part'], trend='mul', seasonal='add', seasonal_periods=26).fit()
-    test_predictions = fitted_model.forecast(len(test_data))
-
-    # Plotting
-    st.write("### Actual vs Predicted Spare Parts Demand:")
-    fig4, ax = plt.subplots(figsize=(12, 6))
-    train_data['spare_part'].plot(legend=True, label='TRAIN DATA', ax=ax)
-    test_data['spare_part'].plot(legend=True, label='TEST DATA', ax=ax)
-    test_predictions.plot(legend=True, label='PREDICTION', ax=ax)
-    st.pyplot(fig4)
-
-    # Error Metrics
-    from sklearn.metrics import mean_absolute_error, mean_squared_error
-    mae_error = mean_absolute_error(test_data['spare_part'], test_predictions)
-    mse_error = mean_squared_error(test_data['spare_part'], test_predictions)
-    st.write(f"**Mean Absolute Error:** {mae_error/10:.2f}")
-    st.write(f"**Mean Squared Error:** {mse_error/1000:.2f}")
-
-# Car Sales Prediction
 def run_car_sales_prediction():
-    st.subheader("Car Sales Prediction")
+    st.header("📈 Car Sales Prediction")
+    
+    df = generate_sales_data()
+    
+    st.subheader("Historical Sales Data")
+    st.dataframe(df.head())
+    
+    # Correlation with Sales
+    st.subheader("Impact Factors on Sales")
+    corr = df[['sales', 'price', 'marketing_spend', 'competitor_launches']].corr()['sales']
+    st.bar_chart(corr.drop('sales'))
 
-    # Upload data
-    uploaded_file = st.file_uploader("Upload your car sales data CSV file", type=["csv"])
-    if uploaded_file is not None:
-        data = pd.read_csv(uploaded_file)
-    else:
-        st.info("Using default dataset.")
-        data = pd.read_csv("data/car_sales_data.csv")
+    st.subheader("Future Sales Projector")
+    with st.form("sales_form"):
+        spend = st.slider("Marketing Spend ($)", 5000, 50000, 15000)
+        price = st.slider("Average Car Price ($)", 20000, 40000, 28000)
+        season = st.checkbox("Is Festival Season?")
+        
+        if st.form_submit_button("Estimate Sales"):
+            # Simple linear formula mock
+            base = 300
+            spend_effect = (spend - 10000) / 100
+            price_effect = (30000 - price) / 100
+            season_effect = 50 if season else 0
+            
+            est_sales = base + spend_effect + price_effect + season_effect
+            st.metric("Estimated Monthly Sales", f"{int(est_sales)} Units")
 
-    # Preprocess data
-    data['date'] = pd.to_datetime(data['date'])
-    data['month'] = data['date'].dt.month
-    data['year'] = data['date'].dt.year
+def run_sentiment_analysis():
+    st.header("🗣️ Customer Sentiment Analysis")
+    st.markdown("Analyze customer feedback to improve services and products.")
+    
+    df = generate_sentiment_data()
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Reviews", len(df))
+    c2.metric("Positive Sentiment", f"{len(df[df['Sentiment']=='Positive'])/len(df)*100:.1f}%")
+    c3.metric("Negative Sentiment", f"{len(df[df['Sentiment']=='Negative'])/len(df)*100:.1f}%")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Sentiment Distribution")
+        fig, ax = plt.subplots()
+        df['Sentiment'].value_counts().plot.pie(autopct='%1.1f%%', ax=ax, colors=['#66b3ff', '#ff9999'])
+        st.pyplot(fig)
+        
+    with col2:
+        st.subheader("Recent Reviews")
+        st.dataframe(df[['Review', 'Sentiment']].head(10), hide_index=True)
+        
+    st.subheader("Filter by Car Model")
+    model_filter = st.selectbox("Select Model", df['Car_Model'].unique())
+    filtered_df = df[df['Car_Model'] == model_filter]
+    
+    st.bar_chart(filtered_df['Sentiment'].value_counts())
 
-    # One-hot encoding for car models
-    car_dummies = pd.get_dummies(data['car_model'], prefix='car')
-    data = pd.concat([data, car_dummies], axis=1)
+def run_geo_analysis():
+    st.header("🌍 Geospatial Sales Insights")
+    st.markdown("Visualize dealership performance across different regions.")
+    
+    df = generate_geo_data()
+    
+    # Map Visualization
+    st.subheader("Dealership Locations & Sales Volume")
+    
+    # Size points by sales volume
+    st.map(df, latitude='lat', longitude='lon', size='Sales_Volume', color='#FF0000')
+    
+    st.subheader("Regional Performance")
+    avg_sales = df.groupby('Region')['Sales_Volume'].mean()
+    st.bar_chart(avg_sales)
+    
+    with st.expander("View Raw Geo Data"):
+        st.dataframe(df)
 
-    # Features and target
-    features = ['price', 'marketing_spend', 'festival_season', 'competitor_launches', 'month']
-    X = data[features]
-    y = data['sales']
+def run_realtime_simulator():
+    st.header("⚡ Real-time Vehicle Telemetry")
+    st.markdown("Simulating live data stream from a connected vehicle engine (Vehicle ID: **V-X99**).")
+    
+    col1, col2, col3 = st.columns(3)
+    placeholder1 = col1.empty()
+    placeholder2 = col2.empty()
+    placeholder3 = col3.empty()
+    
+    chart_placeholder = st.empty()
+    
+    data_container = []
+    
+    if st.button("Start Simulation (10s)"):
+        for i in range(20): # Simulate 20 data points
+            # Generate random live data
+            rpm = np.random.randint(2000, 4000)
+            temp = np.random.normal(90, 2)
+            speed = np.random.randint(60, 120)
+            
+            # Update metrics
+            placeholder1.metric("Engine RPM", f"{rpm}", delta=np.random.randint(-50, 50))
+            placeholder2.metric("Engine Temp (°C)", f"{temp:.1f}", delta=f"{np.random.uniform(-0.5, 0.5):.1f}")
+            placeholder3.metric("Speed (km/h)", f"{speed}", delta=np.random.randint(-2, 2))
+            
+            # Update chart
+            data_container.append({"Time": i, "RPM": rpm, "Temp": temp})
+            chart_df = pd.DataFrame(data_container)
+            
+            with chart_placeholder:
+                st.line_chart(chart_df.set_index("Time")[["RPM", "Temp"]])
+            
+            time.sleep(0.5)
+        st.success("Simulation Complete")
 
-    # Parameter adjustments
-    st.sidebar.subheader("Prediction Parameters")
-    future_months = st.sidebar.slider('Select number of future months to predict:', 1, 12, 3)
+# -----------------------------------------------------------------------------
+# RUN ENTRY POINT
+# -----------------------------------------------------------------------------
 
-    # Train-Test Split
-    from sklearn.model_selection import train_test_split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # Linear Regression Model
-    from sklearn.linear_model import LinearRegression
-    lr = LinearRegression()
-    lr.fit(X_train, y_train)
-
-    # Predictions
-    y_pred = lr.predict(X_test)
-
-    # Evaluation Metrics
-    from sklearn.metrics import mean_squared_error, r2_score
-    mse = mean_squared_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    st.write(f"**Mean Squared Error:** {mse/1000:.2f}")
-    st.write(f"**R² Score:** {-r2:.4f}")
-
-    # Plot Actual vs Predicted
-    st.write("### Actual vs Predicted Sales:")
-    fig5, ax = plt.subplots()
-    ax.scatter(y_test, y_pred)
-    ax.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'k--', lw=2)
-    ax.set_xlabel('Actual')
-    ax.set_ylabel('Predicted')
-    st.pyplot(fig5)
-
-    # Future Predictions
-    st.write("### Future Sales Predictions:")
-    last_features = X.iloc[-1].copy()
-    future_predictions = []
-    future_dates = []
-    for i in range(future_months):
-        last_features['month'] = ((last_features['month'] + 1) % 12) or 12
-        pred = lr.predict([last_features.values])[0]
-        future_predictions.append(pred)
-        future_dates.append(pd.to_datetime(f"{int(data['year'].max())}-{int(last_features['month'])}-01"))
-
-    # Create a DataFrame for future predictions
-    future_df = pd.DataFrame({
-        'Date': future_dates,
-        'Predicted Sales': future_predictions
-    })
-
-    st.table(future_df)
-
-    # Plot Future Predictions
-    st.write("### Sales Forecast:")
-    fig6, ax = plt.subplots()
-    ax.plot(data['date'], data['sales'], label='Historical Sales')
-    ax.plot(future_df['Date'], future_df['Predicted Sales'], label='Predicted Sales', linestyle='--', marker='o')
-    ax.set_xlabel('Date')
-    ax.set_ylabel('Sales')
-    ax.legend()
-    st.pyplot(fig6)
-
-# Run the main function
 if __name__ == "__main__":
+    st.set_page_config(
+        page_title="MotorMinds", 
+        layout="wide",
+        page_icon="🚗"
+    )
     main()
